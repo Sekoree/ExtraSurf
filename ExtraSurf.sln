@@ -2,6 +2,8 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExtraSurf", "ExtraSurf\ExtraSurf.csproj", "{8DB53295-2447-4621-8D7C-1D306A948BD5}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "YoutubeExplode", "..\YoutubeExplodeGit\YoutubeExplode\YoutubeExplode.csproj", "{96C9DC3B-8A03-4A53-9E0B-B217AAB9E03A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -12,5 +14,9 @@ Global
 		{8DB53295-2447-4621-8D7C-1D306A948BD5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8DB53295-2447-4621-8D7C-1D306A948BD5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8DB53295-2447-4621-8D7C-1D306A948BD5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{96C9DC3B-8A03-4A53-9E0B-B217AAB9E03A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{96C9DC3B-8A03-4A53-9E0B-B217AAB9E03A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{96C9DC3B-8A03-4A53-9E0B-B217AAB9E03A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{96C9DC3B-8A03-4A53-9E0B-B217AAB9E03A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

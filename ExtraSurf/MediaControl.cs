@@ -14,6 +14,7 @@ public class MediaControl
     [UnmanagedCallersOnly(EntryPoint = "Init")]
     public static bool Init()
     {
+        Console.WriteLine("Hello from runtime: " + RuntimeInformation.FrameworkDescription);
         var bassInit = Bass.Init();
         if (!bassInit)
             return false;

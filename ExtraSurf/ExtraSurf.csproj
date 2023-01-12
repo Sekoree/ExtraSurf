@@ -14,15 +14,19 @@
     <ItemGroup>
       <PackageReference Include="ManagedBass" Version="3.1.1" />
     </ItemGroup>
-
+    
     <ItemGroup>
-      <ProjectReference Include="..\..\YoutubeExplodeGit\YoutubeExplode\YoutubeExplode.csproj" />
+        <DirectPInvoke Include="NativeLibraries\bass.lib" />
+        <DirectPInvoke Include="NativeLibraries\bass_aac.lib" />
+        <DirectPInvoke Include="NativeLibraries\bassflac.lib" />
+        <DirectPInvoke Include="NativeLibraries\basshls.lib" />
+        <DirectPInvoke Include="NativeLibraries\bassopus.lib" />
+        <DirectPInvoke Include="NativeLibraries\basswebm.lib" />
+        <DirectPInvoke Include="NativeLibraries\basswma.lib" />
     </ItemGroup>
 
     <ItemGroup>
-      <Reference Include="UnityEngine.CoreModule">
-        <HintPath>..\lib\UnityEngine.CoreModule.dll</HintPath>
-      </Reference>
+      <ProjectReference Include="..\..\YoutubeExplodeGit\YoutubeExplode\YoutubeExplode.csproj" />
     </ItemGroup>
 
     <ItemGroup>
