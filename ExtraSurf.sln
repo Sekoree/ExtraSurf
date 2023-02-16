@@ -4,6 +4,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExtraSurf", "ExtraSurf\Extr
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "YoutubeExplode", "..\YoutubeExplodeGit\YoutubeExplode\YoutubeExplode.csproj", "{96C9DC3B-8A03-4A53-9E0B-B217AAB9E03A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibTest", "LibTest\LibTest.csproj", "{19C72766-13B3-4B5E-BE9B-5DACEBC40C95}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExtraSurf.Shared", "ExtraSurf.Shared\ExtraSurf.Shared.csproj", "{6D53F38F-7D1D-4FDE-BD16-BC4D6CD6B4C1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -18,5 +22,13 @@ Global
 		{96C9DC3B-8A03-4A53-9E0B-B217AAB9E03A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{96C9DC3B-8A03-4A53-9E0B-B217AAB9E03A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{96C9DC3B-8A03-4A53-9E0B-B217AAB9E03A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{19C72766-13B3-4B5E-BE9B-5DACEBC40C95}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{19C72766-13B3-4B5E-BE9B-5DACEBC40C95}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{19C72766-13B3-4B5E-BE9B-5DACEBC40C95}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{19C72766-13B3-4B5E-BE9B-5DACEBC40C95}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6D53F38F-7D1D-4FDE-BD16-BC4D6CD6B4C1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6D53F38F-7D1D-4FDE-BD16-BC4D6CD6B4C1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6D53F38F-7D1D-4FDE-BD16-BC4D6CD6B4C1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6D53F38F-7D1D-4FDE-BD16-BC4D6CD6B4C1}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

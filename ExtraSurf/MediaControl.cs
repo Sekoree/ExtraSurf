@@ -1,265 +1,288 @@
-﻿using System.Collections.Concurrent;
-using System.Runtime.InteropServices;
-using System.Text;
+﻿using System.Runtime.InteropServices;
+using ExtraSurf.Shared;
 using ManagedBass;
 
 namespace ExtraSurf;
 
 public class MediaControl
 {
-    private static ConcurrentDictionary<string, int> Streams = new();
-    private static ConcurrentDictionary<string, float[][]> FftData = new();
-    private static ConcurrentDictionary<string, float[]> SumsData = new();
+    private static Callbacks.SongEndedCallback? SongEnded;
 
-    [UnmanagedCallersOnly(EntryPoint = "Init")]
+    private static int _bgmStream = 0;
+    private static int _audioStream = 0;
+
+    //should always be a float[512]
+    private static IntPtr _fftFrameArrayPtr = IntPtr.Zero;
+
+    private static Dictionary<string, float[]> _fftSumsCache = new();
+    private static Dictionary<string, float[][]> _fftFullCache = new();
+
+    [UnmanagedCallersOnly(EntryPoint = "DebugInfo")]
+    public static void DebugInfo()
+    {
+        Console.WriteLine("Hello from .NET7 AOT!");
+        Console.WriteLine($"Running on {RuntimeInformation.OSDescription}");
+        Console.WriteLine($"Architecture: {RuntimeInformation.OSArchitecture}");
+        Console.WriteLine($"Process Architecture: {RuntimeInformation.ProcessArchitecture}");
+        Console.WriteLine($"Framework: {RuntimeInformation.FrameworkDescription}");
+        Console.WriteLine($"Runtime: {RuntimeInformation.RuntimeIdentifier}");
+        Console.WriteLine($"Bass Version: {Bass.Version}");
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "InitBass")]
     public static bool Init()
     {
-        Console.WriteLine("Hello from runtime: " + RuntimeInformation.FrameworkDescription);
-        var bassInit = Bass.Init();
-        if (!bassInit)
-            return false;
+        var couldBass = Bass.Init();
+        if (!couldBass)
+            throw new Exception("[Bass Init] Could not initialize bass: " + Bass.LastError);
 
-        //get all filenames in current directory starting with "bass" except "bass" itself
-        var files = Directory.GetFiles(Directory.GetCurrentDirectory(), "bass*.dll")
-            .Where(x => !x.EndsWith("bass.dll", StringComparison.OrdinalIgnoreCase))
-            .ToArray();
-
-        //load all bass plugins, log errors
-        foreach (var file in files)
+        //get all bass dlls, except bass.dll
+        var bassDlls = Directory.GetFiles(Environment.CurrentDirectory, "bass*.dll");
+        foreach (var bassDll in bassDlls)
         {
-            Console.WriteLine($"Loading {file}...");
-            var plugin = Bass.PluginLoad(file);
-            if (plugin == 0)
-                Console.WriteLine($"Failed to load plugin {file}: {Bass.LastError}");
+            if (bassDll.EndsWith("bass.dll"))
+                continue;
+            Console.WriteLine("[Bass Init]Loading " + bassDll);
+            var pluginIndex = Bass.PluginLoad(bassDll);
+            if (pluginIndex == 0)
+                Console.WriteLine("[Bass Init] Could not load " + bassDll + " Error: " + Bass.LastError);
         }
 
-        return true;
+        Console.WriteLine("[Bass Init] Initialized");
+        return couldBass;
     }
 
-    [UnmanagedCallersOnly(EntryPoint = "StartBGM")]
-    public static bool StartBGM(nint pathPtr, float volume)
+    [UnmanagedCallersOnly(EntryPoint = "SetSongEndedCallback")]
+    public static void SetSongEndedCallback(nint callback)
     {
-        if (Streams.TryGetValue("bgm", out var stream) && stream != 0)
-            Bass.StreamFree(stream);
-
-        var filename = Marshal.PtrToStringUni(pathPtr);
-        stream = Bass.CreateStream(filename, 0, 0, BassFlags.Default);
-        Bass.ChannelSetAttribute(stream, ChannelAttribute.Volume, volume);
-        //loop
-        Bass.ChannelFlags(stream, BassFlags.Loop, BassFlags.Loop);
-        Streams.AddOrUpdate("bgm", stream, (_, _) => stream);
-        Bass.ChannelPlay(stream);
-        return true;
+        SongEnded = Marshal.GetDelegateForFunctionPointer<Callbacks.SongEndedCallback>(callback);
+        Console.WriteLine("[Set Song Ended Callback] Set to " + callback);
     }
 
-    [UnmanagedCallersOnly(EntryPoint = "StopBGM")]
-    public static bool StopBGM()
+    [UnmanagedCallersOnly(EntryPoint = "SetFFTFrameArrayPtr")]
+    public static void SetFFTFrameArrayPtr(nint ptr)
     {
-        if (Streams.TryGetValue("bgm", out var stream) && stream != 0)
-            Bass.StreamFree(stream);
+        _fftFrameArrayPtr = ptr;
+        Console.WriteLine("[Set FFT Frame Array Ptr] Set to " + ptr);
+    }
 
-        Streams.AddOrUpdate("bgm", 0, (_, _) => 0);
+    [UnmanagedCallersOnly(EntryPoint = "PlayBGM")]
+    public static bool PlayBGM(nint pathPtr, float volume)
+    {
+        if (_bgmStream != 0)
+            Bass.StreamFree(_bgmStream);
+
+        var path = Marshal.PtrToStringUni(pathPtr);
+        if (path == null)
+            return false;
+
+        _bgmStream = Bass.CreateStream(path, 0, 0, BassFlags.Float);
+        if (_bgmStream == 0)
+        {
+            Console.WriteLine("[Play BGM] Could not create stream: " + Bass.LastError);
+            return false;
+        }
+
+        Bass.ChannelSetAttribute(_bgmStream, ChannelAttribute.Volume, volume);
+        Bass.ChannelFlags(_bgmStream, BassFlags.Loop, BassFlags.Loop);
+        Bass.ChannelPlay(_bgmStream);
+        Console.WriteLine("[Play BGM] Playing " + path);
         return true;
     }
 
     [UnmanagedCallersOnly(EntryPoint = "SetBGMVolume")]
-    public static bool SetBGMVolume(float volume)
+    public static void SetBGMVolume(float volume)
     {
-        if (Streams.TryGetValue("bgm", out var stream) && stream != 0)
-            Bass.ChannelSetAttribute(stream, ChannelAttribute.Volume, volume);
-
-        return true;
+        Bass.ChannelSetAttribute(_bgmStream, ChannelAttribute.Volume, volume);
+        Console.WriteLine("[Set BGM Volume] Volume: " + volume);
     }
 
-    [UnmanagedCallersOnly(EntryPoint = "GetDuration")]
-    public static double GetDuration(nint dataPtr, int dataLength)
+    [UnmanagedCallersOnly(EntryPoint = "StopBGM")]
+    public static void StopBGM()
     {
-        var stream = Bass.CreateStream(dataPtr, 0, dataLength, BassFlags.Float | BassFlags.Decode | BassFlags.Prescan);
-        var duration = Bass.ChannelBytes2Seconds(stream, Bass.ChannelGetLength(stream));
-        Bass.StreamFree(stream);
-        return duration;
+        Bass.ChannelStop(_bgmStream);
+        Console.WriteLine("[Stop BGM] Stopped");
     }
 
     [UnmanagedCallersOnly(EntryPoint = "PreScanSong")]
-    public static bool PreScanSong(nint pathPtr, nint dataPtr, int dataLength)
+    public static bool PreScanSong(nint identifierPtr, nint dataPtr, long dataLength)
     {
-        var identifier = Marshal.PtrToStringUni(pathPtr);
-        Console.WriteLine($"PreScanSong: {identifier}");
-        var stream = Bass.CreateStream(dataPtr, 0, dataLength, BassFlags.Float | BassFlags.Decode | BassFlags.Prescan);
-        Console.WriteLine($"PreScanSong: {identifier} - {stream}");
-        if (stream == 0)
-        {
-            Console.WriteLine($"PreScanSong: {identifier} - {Bass.LastError}");
-            return false;
-        }
-        var couldGetData = CollectStreamData(identifier, stream);
-        Bass.StreamFree(stream);
-        return couldGetData;
-    }
-
-    [UnmanagedCallersOnly(EntryPoint = "GetStreamByIdentifier")]
-    public static int GetStreamId(nint pathPtr)
-    {
-        var filename = Marshal.PtrToStringUni(pathPtr);
-        if (Streams.TryGetValue(filename, out var stream) && stream != 0)
-            return stream;
-        return -1;
-    }
-
-    [UnmanagedCallersOnly(EntryPoint = "GetAllStreamCount")]
-    public static int GetAllStreamCount()
-    {
-        return Streams.Count;
-    }
-
-    [UnmanagedCallersOnly(EntryPoint = "GetAllStreamIds")]
-    public static IntPtr GetAllStreamIds()
-    {
-        //get all stream ids as an array of strings and join them, seprated by a comma
-        var ids = Streams.Keys.ToArray();
-        var joined = string.Join(",", ids);
-        return Marshal.StringToHGlobalUni(joined);
-    }
-
-    [UnmanagedCallersOnly(EntryPoint = "GetStreamPositionSeconds")]
-    public static double GetStreamPosition(int stream) =>
-        Bass.ChannelBytes2Seconds(stream, Bass.ChannelGetPosition(stream));
-    
-    [UnmanagedCallersOnly(EntryPoint = "GetStreamPositionBytes")]
-    public static long GetStreamPositionBytes(int stream) =>
-        Bass.ChannelGetPosition(stream);
-    
-    [UnmanagedCallersOnly(EntryPoint = "GetStreamLength")]
-    public static long GetStreamLength(int stream) =>
-        Bass.ChannelGetLength(stream);
-
-    [UnmanagedCallersOnly(EntryPoint = "StopStream")]
-    public static bool StopStream(int stream)
-    {
-        Bass.ChannelStop(stream);
-        Bass.StreamFree(stream);
-
-        //remove stream from dictionary
-        var streamToRemove = Streams.FirstOrDefault(x => x.Value == stream).Key;
-        if (streamToRemove != null)
-            Streams.TryRemove(streamToRemove, out _);
-        return true;
-    }
-
-    [UnmanagedCallersOnly(EntryPoint = "PauseStream")]
-    public static bool PauseStream(int stream)
-    {
-        Bass.ChannelPause(stream);
-        return true;
-    }
-
-    [UnmanagedCallersOnly(EntryPoint = "ResumeStream")]
-    public static bool ResumeStream(int stream)
-    {
-        Bass.ChannelPlay(stream);
-        return true;
-    }
-
-    [UnmanagedCallersOnly(EntryPoint = "SetStreamVolume")]
-    public static bool SetStreamVolume(int stream, float volume)
-    {
-        Bass.ChannelSetAttribute(stream, ChannelAttribute.Volume, volume);
-        return true;
-    }
-
-    [UnmanagedCallersOnly(EntryPoint = "PlayStream")]
-    public static bool PlayStream(nint pathPtr, nint dataPtr, int dataLength, float volume)
-    {
-        var filename = Marshal.PtrToStringUni(pathPtr);
-        var stream = Bass.CreateStream(dataPtr, 0, dataLength, BassFlags.Float | BassFlags.Prescan);
-        if (stream == 0)
-            return false;
-        Bass.ChannelSetAttribute(stream, ChannelAttribute.Volume, volume);
-        Streams.AddOrUpdate(filename, stream, (_, _) => stream);
-        Bass.ChannelPlay(stream);
-        return true;
-    }
-
-    [UnmanagedCallersOnly(EntryPoint = "GetLastBassError")]
-    public static nint GetLastBassError()
-    {
-        var lastError = Bass.LastError.ToString();
-        var lastErrorPtr = Marshal.StringToHGlobalUni(lastError);
-        return lastErrorPtr;
-    }
-    
-    [UnmanagedCallersOnly(EntryPoint = "GetStreamDataLength")]
-    public static int GetStreamData(nint pathPtr)
-    {
-        var filename = Marshal.PtrToStringUni(pathPtr);
-        if (SumsData.TryGetValue(filename, out var data))
-            return data.Length;
-        return -1;
-    }
-    
-    [UnmanagedCallersOnly(EntryPoint = "GetStreamDataSums")]
-    public static IntPtr GetStreamDataSums(nint pathPtr)
-    {
-        var filename = Marshal.PtrToStringUni(pathPtr);
-        if (!SumsData.TryGetValue(filename, out var data)) 
-            return IntPtr.Zero;
-        
-        var dataPtr = Marshal.AllocHGlobal(data.Length * sizeof(float));
-        Marshal.Copy(data, 0, dataPtr, data.Length);
-        return dataPtr;
-    }
-    
-    [UnmanagedCallersOnly(EntryPoint = "GetStreamDataFull")]
-    public static IntPtr GetStreamDataFull(nint pathPtr, int pos)
-    {
-        var filename = Marshal.PtrToStringUni(pathPtr);
-        if (!FftData.TryGetValue(filename, out var data)) 
-            return IntPtr.Zero;
-        
-        if (pos >= data.Length)
-            return IntPtr.Zero;
-        
-        var dataPtr = Marshal.AllocHGlobal(data[pos].Length * sizeof(float));
-        Marshal.Copy(data[pos], 0, dataPtr, data[pos].Length);
-        return dataPtr;
-    }
-
-    private static bool CollectStreamData(string identifier, int stream)
-    {
-        Console.WriteLine($"Collecting data for {identifier}");
-        //try to get stream
-        if (stream == 0)
+        var identifier = Marshal.PtrToStringUni(identifierPtr);
+        if (identifier == null)
             return false;
 
-        List<float[]> fftSegments = new();
-
-        //get fft data
-        Console.WriteLine("Getting fft data");
-        var fftData = new float[512];
-        while (Bass.ChannelGetData(stream, fftData, (int)DataFlags.FFT1024) > 0)
+        var tempChannel =
+            Bass.CreateStream(dataPtr, 0, dataLength, BassFlags.Decode | BassFlags.Float | BassFlags.Prescan);
+        if (tempChannel == 0)
         {
-            fftSegments.Add(fftData);
-            fftData = new float[512];
+            Console.WriteLine("[PreScan Song] Could not create stream: " + Bass.LastError);
+            return false;
         }
 
-        float[][] fftDataArray = fftSegments.ToArray();
-        Console.WriteLine($"Got {fftDataArray.Length} fft segments");
+        var fftSums = new List<float>();
+        var fftFull = new List<float[]>();
+        var fft = new float[512]; //use with FFT1024 flag
 
-        //get sum data
-        var sumData = new float[fftDataArray.Length];
-        for (int i = 0; i < fftDataArray.Length; i++)
+        while (Bass.ChannelGetData(tempChannel, fft, (int)(DataFlags.FFT1024 | DataFlags.Float)) > 0)
         {
-            float sum = 0;
-            for (int j = 0; j < fftDataArray[i].Length; j++)
-                sum += fftDataArray[i][j];
+            // do Dylan thing aka divide each value by 4
+            for (var i = 0; i < fft.Length; i++)
+                fft[i] /= 4;
 
-            sumData[i] = (float)Math.Max(0f, Math.Sqrt(sum));
+            fftFull.Add(fft);
+            var sum = fft.Sum(t => (float)Math.Sqrt(Math.Max(0f, t)));
+            fftSums.Add(Math.Max(0f, sum));
+            fft = new float[512];
         }
 
-        //add to dictionary
-        Console.WriteLine("Adding to dictionary");
-        FftData.AddOrUpdate(identifier, fftDataArray, (_, _) => fftDataArray);
-        SumsData.AddOrUpdate(identifier, sumData, (_, _) => sumData);
+        Bass.StreamFree(tempChannel);
+
+        _fftSumsCache.Add(identifier, fftSums.ToArray());
+        _fftFullCache.Add(identifier, fftFull.ToArray());
+        return true;
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "IsSongCached")]
+    public static bool IsSongCached(nint identifierPtr)
+    {
+        var identifier = Marshal.PtrToStringUni(identifierPtr);
+        return identifier != null && _fftSumsCache.ContainsKey(identifier);
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "GetSongFftSums")]
+    public static SongFftDataSums GetSongFftSums(nint identifierPtr)
+    {
+        var identifier = Marshal.PtrToStringUni(identifierPtr);
+        if (identifier == null)
+            return new SongFftDataSums();
+
+        if (!_fftSumsCache.ContainsKey(identifier))
+            return new SongFftDataSums();
+
+        var fftSums = _fftSumsCache[identifier];
+        var fftSumsPtr = Marshal.AllocHGlobal(fftSums.Length * sizeof(float));
+        Marshal.Copy(fftSums, 0, fftSumsPtr, fftSums.Length);
+        return new SongFftDataSums()
+        {
+            IdentifierPtr = identifierPtr,
+            DataPtr = fftSumsPtr,
+            DataLength = fftSums.Length
+        };
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "GetSongFftFull")]
+    public static SongFftDataFull GetSongFftFull(nint identifierPtr, int index)
+    {
+        var identifier = Marshal.PtrToStringUni(identifierPtr);
+        if (identifier == null)
+            return new SongFftDataFull();
+
+        if (!_fftFullCache.ContainsKey(identifier))
+            return new SongFftDataFull();
+
+        var fftFull = _fftFullCache[identifier];
+        if (index >= fftFull.Length)
+            return new SongFftDataFull();
+
+        var fft = fftFull[index];
+        var fftPtr = Marshal.AllocHGlobal(fft.Length * sizeof(float));
+        Marshal.Copy(fft, 0, fftPtr, fft.Length);
+        return new SongFftDataFull()
+        {
+            IdentifierPtr = identifierPtr,
+            DataPtr = fftPtr,
+            FullDataLength = fftFull.Length,
+            DataIndex = index
+        };
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "PlaySong")]
+    public static bool PlaySong(nint identifierPtr, nint dataPtr, long dataLength, float volume)
+    {
+        var identifier = Marshal.PtrToStringUni(identifierPtr);
+        if (identifier == null)
+            return false;
+
+        if (_audioStream != 0)
+            Bass.StreamFree(_audioStream);
+
+        _audioStream = Bass.CreateStream(dataPtr, 0, dataLength, BassFlags.Float | BassFlags.Prescan);
+        if (_audioStream == 0)
+        {
+            Console.WriteLine("[Play Song] Could not create stream: " + Bass.LastError);
+            return false;
+        }
+
+        Bass.ChannelSetAttribute(_audioStream, ChannelAttribute.Volume, volume);
+        //set granule to 512
+        Bass.ChannelSetAttribute(_audioStream, ChannelAttribute.Granule, 512);
+        //set sync to call end callback
+        Bass.ChannelSetSync(_audioStream, SyncFlags.End, 0, (_, _, _, _) => SongEnded?.Invoke());
+        Bass.ChannelPlay(_audioStream);
+        Console.WriteLine("[Play Song] Playing " + identifier);
+        return true;
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "PauseSong")]
+    public static void PauseSong()
+    {
+        Bass.ChannelPause(_audioStream);
+        Console.WriteLine("[Pause Song] Paused");
+    }
+    
+    [UnmanagedCallersOnly(EntryPoint = "ResumeSong")]
+    public static void ResumeSong()
+    {
+        Bass.ChannelPlay(_audioStream);
+        Console.WriteLine("[Resume Song] Resumed");
+    }
+    
+    [UnmanagedCallersOnly(EntryPoint = "SetSongVolume")]
+    public static void SetSongVolume(float volume)
+    {
+        Bass.ChannelSetAttribute(_audioStream, ChannelAttribute.Volume, volume);
+        Console.WriteLine("[Set Song Volume] Volume: " + volume);
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "StopSong")]
+    public static void StopSong()
+    {
+        Bass.ChannelStop(_audioStream);
+        Console.WriteLine("[Stop Song] Stopped");
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "GetSongPosition")]
+    public static long GetSongPosition()
+    {
+        if (Bass.ChannelIsActive(_audioStream) == PlaybackState.Playing)
+            return -1;
+
+        return Bass.ChannelGetPosition(_audioStream);
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "GetSongPositionSeconds")]
+    public static double GetSongPositionSeconds()
+    {
+        if (Bass.ChannelIsActive(_audioStream) == PlaybackState.Playing)
+            return -1;
+
+        return Bass.ChannelBytes2Seconds(_audioStream, Bass.ChannelGetPosition(_audioStream));
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "GetLiveFft")]
+    public static bool GetLiveFft()
+    {
+        //check if stream is playing
+        if (Bass.ChannelIsActive(_audioStream) == PlaybackState.Playing)
+            return false;
+
+        var fft = new float[512];
+        Bass.ChannelGetData(_audioStream, fft, (int)(DataFlags.FFT1024 | DataFlags.Float));
+        // do Dylan thing aka divide each value by 4
+        for (var i = 0; i < fft.Length; i++)
+            fft[i] /= 4;
+
+        Marshal.Copy(fft, 0, _fftFrameArrayPtr, fft.Length);
         return true;
     }
 }

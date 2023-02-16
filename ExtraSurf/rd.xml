@@ -1,5 +1,5 @@
-﻿<Directives xmlns="http://schemas.microsoft.com/netfx/2013/01/metadata">
+﻿<Directives>
     <Application>
-        <Assembly Name="YouTubeExplode" Dynamic="Required All" />
+        <Assembly Name="YouTubeExplode" Dynamic="Required All"/>
     </Application>
 </Directives>
